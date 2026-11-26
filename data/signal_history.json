@@ -1,1 +1,15 @@
-[]
+[
+  {
+    "id": "9e50e4d539387fb1",
+    "timestamp": "2026-11-26T12:50:06.236487+00:00",
+    "symbol": "XAUUSD",
+    "status": "WAIT",
+    "timeframe": "5m",
+    "candle_time": "2026-11-26T12:45:00+00:00",
+    "entry": null,
+    "stop_loss": null,
+    "take_profit": null,
+    "score": 0,
+    "reason": "Belum ada zona M15"
+  }
+]
