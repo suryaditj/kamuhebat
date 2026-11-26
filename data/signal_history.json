@@ -37,5 +37,57 @@
     "take_profit": null,
     "score": 0,
     "reason": "EARLY belum lengkap: rejection, struktur M5 | CONFIRMED belum lengkap: rejection, displacement, pullback"
+  },
+  {
+    "id": "04f7684a1181cd5f",
+    "timestamp": "2026-11-26T13:51:27.114778+00:00",
+    "symbol": "XAUUSD",
+    "status": "WAIT",
+    "timeframe": "5m",
+    "candle_time": "2026-11-26T13:45:00+00:00",
+    "entry": null,
+    "stop_loss": null,
+    "take_profit": null,
+    "score": 0,
+    "reason": "EARLY belum lengkap: rejection, struktur M5 | CONFIRMED belum lengkap: rejection, BOS/CHoCH, displacement, pullback"
+  },
+  {
+    "id": "3b309af0ad454a82",
+    "timestamp": "2026-11-26T13:55:12.275649+00:00",
+    "symbol": "XAUUSD",
+    "status": "WAIT",
+    "timeframe": "5m",
+    "candle_time": "2026-11-26T13:50:00+00:00",
+    "entry": null,
+    "stop_loss": null,
+    "take_profit": null,
+    "score": 0,
+    "reason": "EARLY belum lengkap: rejection, struktur M5 | CONFIRMED belum lengkap: rejection, BOS/CHoCH, displacement, pullback"
+  },
+  {
+    "id": "ae2f88c82aa259a0",
+    "timestamp": "2026-11-26T14:27:54.107448+00:00",
+    "symbol": "XAUUSD",
+    "status": "WAIT",
+    "timeframe": "5m",
+    "candle_time": "2026-11-26T14:20:00+00:00",
+    "entry": null,
+    "stop_loss": null,
+    "take_profit": null,
+    "score": 0,
+    "reason": "Data analisis belum siap"
+  },
+  {
+    "id": "ac16c4fd3b8473d2",
+    "timestamp": "2026-11-26T15:21:38.934559+00:00",
+    "symbol": "XAUUSD",
+    "status": "WAIT",
+    "timeframe": "5m",
+    "candle_time": "2026-11-26T15:15:00+00:00",
+    "entry": null,
+    "stop_loss": null,
+    "take_profit": null,
+    "score": 0,
+    "reason": "Data analisis belum siap"
   }
 ]
