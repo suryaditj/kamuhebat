@@ -11,5 +11,18 @@
     "take_profit": null,
     "score": 0,
     "reason": "Belum ada zona M15"
+  },
+  {
+    "id": "6b05c4da1c84a2e2",
+    "timestamp": "2026-11-26T12:57:03.432234+00:00",
+    "symbol": "XAUUSD",
+    "status": "WAIT",
+    "timeframe": "5m",
+    "candle_time": "2026-11-26T12:50:00+00:00",
+    "entry": null,
+    "stop_loss": null,
+    "take_profit": null,
+    "score": 0,
+    "reason": "Bukti entry belum lengkap"
   }
 ]
