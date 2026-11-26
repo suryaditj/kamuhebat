@@ -133,16 +133,25 @@ def detect_zones(
                         "strength": impulse / max(base_average, 0.000001)
                     })
 
+    
     # Zona terbaru lebih diprioritaskan.
     zones.sort(
         key=lambda zone: zone["created_at"],
         reverse=True
     )
 
-    # Hilangkan zona duplikat atau hampir sama.
     filtered = []
+    counts = {
+        "SUPPLY": 0,
+        "DEMAND": 0
+    }
 
     for zone in zones:
+        zone_type = zone["type"]
+
+        if counts[zone_type] >= max_zones:
+            continue
+
         duplicate = False
 
         for existing in filtered:
@@ -152,22 +161,20 @@ def detect_zones(
             )
 
             if (
-                zone["type"] == existing["type"]
+                zone_type == existing["type"]
                 and overlap > 0
             ):
                 duplicate = True
                 break
 
-        if not duplicate:
-            filtered.append(zone)
-
-        if len([
-            z for z in filtered
-            if z["type"] == zone["type"]
-        ]) >= max_zones:
+        if duplicate:
             continue
 
+        filtered.append(zone)
+        counts[zone_type] += 1
+
     return filtered
+
 
 
 def price_in_zone(price: float, zone: dict) -> bool:
