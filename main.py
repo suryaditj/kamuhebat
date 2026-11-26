@@ -1,4 +1,8 @@
+
+import asyncio
+import json
 import logging
+from pathlib import Path
 
 from telegram import Update
 from telegram.ext import (
@@ -28,17 +32,58 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+STATE_DIR = Path("state")
+OFFSET_FILE = STATE_DIR / "telegram_offset.json"
 
-async def error_handler(update, context):
-    """Mencatat error tanpa membocorkan detail internal ke pengguna."""
-    logger.error(
-        "Terjadi error saat memproses update",
-        exc_info=context.error,
+
+def load_offset():
+    """Membaca update ID terakhir yang sudah diproses."""
+    try:
+        if OFFSET_FILE.exists():
+            data = json.loads(OFFSET_FILE.read_text())
+            return int(data.get("offset", 0))
+    except (ValueError, OSError, json.JSONDecodeError):
+        logger.warning("Gagal membaca offset Telegram.")
+
+    return 0
+
+
+def save_offset(offset):
+    """Menyimpan update ID terakhir."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+    temporary_file = OFFSET_FILE.with_suffix(".tmp")
+    temporary_file.write_text(
+        json.dumps({"offset": offset})
+    )
+    temporary_file.replace(OFFSET_FILE)
+
+
+def register_handlers(application):
+    """Mendaftarkan perintah dan tombol Telegram."""
+
+    commands = {
+        "start": start_command,
+        "analisa": analyze_command,
+        "refresh": refresh_command,
+        "market": market_command,
+        "history": history_command,
+        "settings": settings_command,
+        "help": help_command,
+    }
+
+    for command, handler in commands.items():
+        application.add_handler(
+            CommandHandler(command, handler)
+        )
+
+    application.add_handler(
+        CallbackQueryHandler(button_callback)
     )
 
 
-def create_application():
-    """Membuat aplikasi Telegram dan mendaftarkan handler."""
+async def run_once():
+    """Memproses update Telegram dalam satu eksekusi."""
 
     validate_config()
 
@@ -51,61 +96,55 @@ def create_application():
         .build()
     )
 
-    # Perintah Telegram
-    application.add_handler(
-        CommandHandler("start", start_command)
-    )
+    register_handlers(application)
 
-    application.add_handler(
-        CommandHandler("analisa", analyze_command)
-    )
+    await application.initialize()
+    await application.start()
 
-    application.add_handler(
-        CommandHandler("refresh", refresh_command)
-    )
+    try:
+        # Pastikan mode webhook tidak menghalangi getUpdates.
+        await application.bot.delete_webhook(
+            drop_pending_updates=False
+        )
 
-    application.add_handler(
-        CommandHandler("market", market_command)
-    )
+        offset = load_offset()
 
-    application.add_handler(
-        CommandHandler("history", history_command)
-    )
+        updates = await application.bot.get_updates(
+            offset=offset if offset > 0 else None,
+            timeout=0,
+            allowed_updates=Update.ALL_TYPES,
+        )
 
-    application.add_handler(
-        CommandHandler("settings", settings_command)
-    )
+        if not updates:
+            logger.info("Tidak ada pesan Telegram baru.")
+            return
 
-    application.add_handler(
-        CommandHandler("help", help_command)
-    )
+        for update in updates:
+            try:
+                await application.process_update(update)
 
-    # Tombol inline
-    application.add_handler(
-        CallbackQueryHandler(button_callback)
-    )
+                # Update berikutnya akan mengakui update sebelumnya.
+                offset = update.update_id + 1
+                save_offset(offset)
 
-    # Penanganan error
-    application.add_error_handler(error_handler)
+            except Exception:
+                logger.exception(
+                    "Gagal memproses update %s",
+                    update.update_id,
+                )
+                break
 
-    return application
+        logger.info("Pemrosesan Telegram selesai.")
+
+    finally:
+        await application.stop()
+        await application.shutdown()
 
 
 def main():
-    """Menjalankan bot."""
+    logger.info("HYBRID SMC HUNTER mulai bekerja.")
 
-    try:
-        application = create_application()
-
-        logger.info("HYBRID SMC HUNTER sedang dijalankan...")
-
-        application.run_polling(
-            allowed_updates=Update.ALL_TYPES
-        )
-
-    except Exception:
-        logger.exception("Bot gagal dijalankan")
-        raise
+    asyncio.run(run_once())
 
 
 if __name__ == "__main__":
