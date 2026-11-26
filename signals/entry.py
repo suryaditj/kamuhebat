@@ -40,19 +40,6 @@ def evaluate_entry(
     risk_reward: float = 2.0,
     sl_buffer: float = 0.5,
 ) -> dict:
-    """
-    Hybrid Entry:
-    H1 = arah utama.
-    M15 = zona supply/demand.
-    M5 = konfirmasi entry.
-
-    EARLY:
-    Zona + rejection + struktur M5.
-
-    CONFIRMED:
-    Zona + rejection + BOS/CHoCH
-    + displacement + pullback.
-    """
 
     if entry_style not in VALID_STYLES:
         raise ValueError("Entry style tidak valid")
@@ -118,7 +105,7 @@ def evaluate_entry(
         return wait_result("Batas zona tidak valid")
 
     # ==========================================
-    # 2. VALIDASI CANDLE M5
+    # 2. VALIDASI CANDLE TERAKHIR
     # ==========================================
 
     candle = m5_df.iloc[-1]
@@ -136,23 +123,40 @@ def evaluate_entry(
     ):
         return wait_result("Candle M5 tidak valid")
 
-    zone_touched = (
-        candle_high >= zone_low
-        and candle_low <= zone_high
-    )
-
-    if not zone_touched:
-        return wait_result("Harga M5 belum menguji zona")
-
     # ==========================================
-    # 3. REJECTION M5
+    # 3. VALIDASI REJECTION DAN PENGUJIAN ZONA
     # ==========================================
 
     rejection = m5.get("rejection") or {}
 
-    rejection_valid = (
+    rejection_age = rejection.get("age_bars")
+
+    try:
+        rejection_age = int(rejection_age)
+    except (TypeError, ValueError):
+        rejection_age = 999
+
+    zone_touched = (
+        rejection.get("in_zone") is True
+        and 0 <= rejection_age <= 4
+    )
+
+    rejection_direction_valid = (
         rejection.get("rejection") is True
         and rejection.get("direction") == direction
+    )
+
+    # EARLY lebih ketat terhadap usia rejection.
+    early_rejection_valid = (
+        rejection_direction_valid
+        and 0 <= rejection_age <= 2
+    )
+
+    # CONFIRMED memberi ruang untuk BOS dan displacement
+    # terjadi setelah rejection.
+    confirmed_rejection_valid = (
+        rejection_direction_valid
+        and 0 <= rejection_age <= 4
     )
 
     # ==========================================
@@ -187,7 +191,8 @@ def evaluate_entry(
     pullback = m5.get("pullback") or {}
 
     bos_valid = (
-        bos.get("event") in ("BOS", "CHOCH")
+        bos.get("detected") is True
+        and bos.get("event") in ("BOS", "CHOCH")
         and bos.get("direction") == direction
     )
 
@@ -202,32 +207,55 @@ def evaluate_entry(
         and pullback.get("direction") == direction
     )
 
+    # ==========================================
+    # 6. BUKTI DAN DIAGNOSTIK
+    # ==========================================
+
     evidence = {
         "zone_touched": zone_touched,
-        "rejection": rejection_valid,
+        "rejection": rejection_direction_valid,
+        "rejection_age": rejection_age,
+        "early_rejection": early_rejection_valid,
+        "confirmed_rejection": confirmed_rejection_valid,
         "structure": structure_valid,
         "bos": bos_valid,
         "displacement": displacement_valid,
         "pullback": pullback_valid,
     }
 
+    early_checks = {
+        "pengujian zona": zone_touched,
+        "rejection": early_rejection_valid,
+        "struktur M5": structure_valid,
+    }
+
+    confirmed_checks = {
+        "pengujian zona": zone_touched,
+        "rejection": confirmed_rejection_valid,
+        "BOS/CHoCH": bos_valid,
+        "displacement": displacement_valid,
+        "pullback": pullback_valid,
+    }
+
+    early_missing = [
+        name for name, valid in early_checks.items()
+        if not valid
+    ]
+
+    confirmed_missing = [
+        name for name, valid in confirmed_checks.items()
+        if not valid
+    ]
+
+    evidence["early_missing"] = early_missing
+    evidence["confirmed_missing"] = confirmed_missing
+
     # ==========================================
-    # 6. HYBRID ENTRY DECISION
+    # 7. KEPUTUSAN HYBRID
     # ==========================================
 
-    early_valid = (
-        zone_touched
-        and rejection_valid
-        and structure_valid
-    )
-
-    confirmed_valid = (
-        zone_touched
-        and rejection_valid
-        and bos_valid
-        and displacement_valid
-        and pullback_valid
-    )
+    early_valid = not early_missing
+    confirmed_valid = not confirmed_missing
 
     entry_type = None
 
@@ -243,52 +271,14 @@ def evaluate_entry(
         elif early_valid:
             entry_type = "EARLY"
 
-    # ==========================================
-    # 7. DIAGNOSIS WAIT
-    # ==========================================
-
     if entry_type is None:
-        early_requirements = {
-            "zona tersentuh": zone_touched,
-            "rejection": rejection_valid,
-            "struktur M5": structure_valid,
-        }
-
-        confirmed_requirements = {
-            "zona tersentuh": zone_touched,
-            "rejection": rejection_valid,
-            "BOS/CHoCH": bos_valid,
-            "displacement": displacement_valid,
-            "pullback": pullback_valid,
-        }
-
-        early_missing = [
-            name
-            for name, valid in early_requirements.items()
-            if not valid
-        ]
-
-        confirmed_missing = [
-            name
-            for name, valid in confirmed_requirements.items()
-            if not valid
-        ]
-
-        evidence["early_missing"] = early_missing
-        evidence["confirmed_missing"] = confirmed_missing
-
         if entry_style == "early":
-            reason = (
-                "EARLY belum lengkap: "
-                + ", ".join(early_missing)
-            )
-
+            reason = "EARLY belum lengkap: " + ", ".join(early_missing)
         elif entry_style == "confirmed":
             reason = (
                 "CONFIRMED belum lengkap: "
                 + ", ".join(confirmed_missing)
             )
-
         else:
             reason = (
                 "EARLY belum lengkap: "
@@ -335,7 +325,7 @@ def evaluate_entry(
             return wait_result("Posisi SELL tidak valid", evidence)
 
     # ==========================================
-    # 10. FINAL RESULT
+    # 10. HASIL AKHIR
     # ==========================================
 
     return {
@@ -349,8 +339,7 @@ def evaluate_entry(
         "zone": target_zone,
         "reason": (
             f"{entry_type} {status}: "
-            "zona, rejection, dan konfirmasi struktur "
-            "memenuhi aturan entry."
+            "zona, rejection, dan konfirmasi entry memenuhi aturan."
         ),
         "evidence": evidence,
     }
