@@ -1,10 +1,18 @@
-name: Hybrid SMC Hunter
+
+name: SMC Hunter
 
 on:
   workflow_dispatch:
 
   schedule:
     - cron: "*/5 * * * *"
+
+concurrency:
+  group: hybrid-smc-hunter
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   run-bot:
@@ -19,6 +27,14 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Restore Telegram state
+        uses: actions/cache/restore@v4
+        with:
+          path: state/telegram_offset.json
+          key: telegram-state-${{ github.run_id }}
+          restore-keys: |
+            telegram-state-
 
       - name: Install dependencies
         run: |
@@ -38,3 +54,10 @@ jobs:
           ENTRY_STYLE: hybrid
           MAX_RISK_PERCENT: 1.0
         run: python main.py
+
+      - name: Save Telegram state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state/telegram_offset.json
+          key: telegram-state-${{ github.run_id }}
