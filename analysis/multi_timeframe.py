@@ -64,7 +64,6 @@ def _get_trend(df):
 
 
 def _detect_zones(df, max_zones=5):
-    """Gunakan satu detektor zona resmi untuk semua timeframe."""
     try:
         return detect_zones(
             df,
@@ -84,20 +83,23 @@ def _select_target_zone(zones, bias, price):
 
     candidates = [
         zone for zone in zones
-        if zone["type"] == expected_type
+        if zone.get("type") == expected_type
     ]
 
     if not candidates:
         return None
 
     def distance(zone):
-        if zone["low"] <= price <= zone["high"]:
+        low = float(zone["low"])
+        high = float(zone["high"])
+
+        if low <= price <= high:
             return 0
 
-        if price < zone["low"]:
-            return zone["low"] - price
+        if price < low:
+            return low - price
 
-        return price - zone["high"]
+        return price - high
 
     return min(candidates, key=distance)
 
@@ -153,19 +155,54 @@ def _analyze_rejection(candle, zone):
         and close_position <= 0.40
     )
 
-    if zone["type"] == "DEMAND" and bullish_rejection:
+    if zone.get("type") == "DEMAND" and bullish_rejection:
         result["detected"] = True
         result["direction"] = "BULLISH"
 
-    elif zone["type"] == "SUPPLY" and bearish_rejection:
+    elif zone.get("type") == "SUPPLY" and bearish_rejection:
         result["detected"] = True
         result["direction"] = "BEARISH"
 
     return result
 
 
+def _analyze_recent_rejection(df, zone, lookback=5):
+    """
+    Memeriksa rejection pada candle M5 terbaru.
+    age_bars=0 berarti candle terakhir.
+    """
+    empty = {
+        "detected": False,
+        "direction": None,
+        "in_zone": False,
+        "lower_wick": 0.0,
+        "upper_wick": 0.0,
+        "age_bars": None,
+        "candle_index": None,
+    }
+
+    if zone is None or df.empty:
+        return empty
+
+    start = max(0, len(df) - lookback)
+    latest_result = None
+
+    for index in range(len(df) - 1, start - 1, -1):
+        result = _analyze_rejection(df.iloc[index], zone)
+
+        result["age_bars"] = len(df) - 1 - index
+        result["candle_index"] = index
+
+        if latest_result is None:
+            latest_result = result
+
+        if result["detected"]:
+            return result
+
+    return latest_result or empty
+
+
 def _detect_bos(df):
-    """Cari candle break terhadap swing yang sudah terkonfirmasi."""
     result = {
         "event": None,
         "direction": None,
@@ -180,8 +217,8 @@ def _detect_bos(df):
     start = max(10, len(df) - 12)
 
     for index in range(start, len(df)):
-        # Struktur dihitung hanya dari candle sebelum candle pemecah.
         before = df.iloc[:index]
+
         try:
             structure = classify_structure(before)
         except (KeyError, IndexError, TypeError, ValueError):
@@ -189,12 +226,14 @@ def _detect_bos(df):
 
         last_high = structure.get("last_high")
         last_low = structure.get("last_low")
+
         previous_close = float(df["close"].iloc[index - 1])
         current_close = float(df["close"].iloc[index])
         trend = structure.get("trend", "RANGE")
 
         if last_high:
             level = float(last_high["price"])
+
             if previous_close <= level < current_close:
                 result = {
                     "event": "CHOCH" if trend == "BEARISH" else "BOS",
@@ -206,6 +245,7 @@ def _detect_bos(df):
 
         if last_low:
             level = float(last_low["price"])
+
             if previous_close >= level > current_close:
                 result = {
                     "event": "CHOCH" if trend == "BULLISH" else "BOS",
@@ -219,7 +259,6 @@ def _detect_bos(df):
 
 
 def _detect_displacement(df, bos):
-    """Displacement harus terjadi setelah BOS dan sebelum candle pullback."""
     result = {
         "confirmed": False,
         "direction": None,
@@ -234,9 +273,9 @@ def _detect_displacement(df, bos):
     direction = bos.get("direction")
     bos_index = int(bos["event_index"])
 
-    # Candle terakhir disisihkan untuk menguji pullback.
     for index in range(bos_index + 1, len(df) - 1):
         first = max(0, index - 20)
+
         previous_bodies = (
             df["close"].iloc[first:index]
             - df["open"].iloc[first:index]
@@ -246,20 +285,24 @@ def _detect_displacement(df, bos):
             continue
 
         average_body = float(previous_bodies.mean())
+
         if average_body <= 0:
             continue
 
         candle = df.iloc[index]
+
         open_price = float(candle["open"])
         close = float(candle["close"])
         body = abs(close - open_price)
+
         candle_range = max(
             float(candle["high"]) - float(candle["low"]),
             0.0000001,
         )
 
         correct_direction = (
-            close > open_price if direction == "BULLISH"
+            close > open_price
+            if direction == "BULLISH"
             else close < open_price
         )
 
@@ -280,7 +323,6 @@ def _detect_displacement(df, bos):
 
 
 def _detect_pullback(df, bos, displacement):
-    """Pullback hanya valid setelah candle displacement."""
     result = {
         "detected": False,
         "held": False,
@@ -298,16 +340,24 @@ def _detect_pullback(df, bos, displacement):
 
     level = bos.get("level")
     direction = bos.get("direction")
+
     if level is None:
         return result
 
     candle = df.iloc[-1]
+
     high = float(candle["high"])
     low = float(candle["low"])
     close = float(candle["close"])
 
-    average_range = (df["high"] - df["low"]).tail(20).mean()
-    tolerance = max(float(average_range) * 0.25, 0.0000001)
+    average_range = (
+        df["high"] - df["low"]
+    ).tail(20).mean()
+
+    tolerance = max(
+        float(average_range) * 0.25,
+        0.0000001,
+    )
 
     touched = (
         low <= float(level) + tolerance
@@ -354,39 +404,30 @@ def analyze_multi_timeframe(h1, m15, m5):
     h1_zones = _detect_zones(h1)
     m15_zones = _detect_zones(m15)
 
-    h1_target_zone = _select_target_zone(
-        h1_zones,
-        h1_trend,
-        current_price
-    ) if h1_trend in ("BULLISH", "BEARISH") else None
+    h1_target_zone = (
+        _select_target_zone(h1_zones, h1_trend, current_price)
+        if h1_trend in ("BULLISH", "BEARISH")
+        else None
+    )
 
-    m15_target_zone = _select_target_zone(
-        m15_zones,
-        h1_trend,
-        current_price
-    ) if h1_trend in ("BULLISH", "BEARISH") else None
+    m15_target_zone = (
+        _select_target_zone(m15_zones, h1_trend, current_price)
+        if h1_trend in ("BULLISH", "BEARISH")
+        else None
+    )
 
-    # H1 menentukan arah; M15 mencari zona searah untuk area entry.
-    # Zona M15 tidak wajib beririsan dengan zona H1 karena kedua timeframe
-    # memiliki skala dan rentang harga yang berbeda.
+    # H1 menentukan arah, M15 menyediakan zona entry.
     target_zone = m15_target_zone
 
-    last_candle = m5.iloc[-1]
-
-    rejection = _analyze_rejection(
-        last_candle,
-        target_zone
+    rejection = _analyze_recent_rejection(
+        m5,
+        target_zone,
+        lookback=5,
     )
 
     bos = _detect_bos(m5)
-
     displacement = _detect_displacement(m5, bos)
-
-    pullback = _detect_pullback(
-        m5,
-        bos,
-        displacement,
-    )
+    pullback = _detect_pullback(m5, bos, displacement)
 
     ready = h1_trend in ("BULLISH", "BEARISH")
 
@@ -429,6 +470,8 @@ def analyze_multi_timeframe(h1, m15, m5):
                 "in_zone": rejection["in_zone"],
                 "lower_wick": rejection["lower_wick"],
                 "upper_wick": rejection["upper_wick"],
+                "age_bars": rejection["age_bars"],
+                "candle_index": rejection["candle_index"],
             },
             "bos_choch": bos,
             "displacement": displacement,
