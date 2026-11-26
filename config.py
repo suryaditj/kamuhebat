@@ -6,7 +6,8 @@ load_dotenv()
 
 
 def get_env(name: str, default: str = "") -> str:
-    return os.getenv(name, default).strip()
+    # GitHub Actions dapat mengirim secret yang tidak disetel sebagai string kosong.
+    return (os.getenv(name) or default).strip()
 
 
 @dataclass(frozen=True)

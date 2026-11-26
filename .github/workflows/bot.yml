@@ -47,21 +47,18 @@ jobs:
           MAX_RISK_PERCENT: 1.0
         run: python main.py
 
-      - name: Save Telegram Offset
+      - name: Save Bot State and Signal History
         if: always()
         run: |
-          if [ -f state/telegram_offset.json ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-            git add state/telegram_offset.json
+          # Kedua file harus dipersistenkan karena runner GitHub Actions bersifat sementara.
+          git add -A -- state data
 
-            if ! git diff --cached --quiet; then
-              git commit -m "Update Telegram offset"
-              git push
-            else
-              echo "Offset tidak berubah."
-            fi
+          if ! git diff --cached --quiet; then
+            git commit -m "Update bot state and signal history"
+            git push
           else
-            echo "File offset belum tersedia."
+            echo "Tidak ada perubahan state atau riwayat."
           fi

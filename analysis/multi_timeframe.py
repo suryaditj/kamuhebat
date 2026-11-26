@@ -226,104 +226,122 @@ def _analyze_rejection(candle, zone):
 
 
 def _detect_bos(df):
+    """Cari candle break terhadap swing yang sudah terkonfirmasi."""
     result = {
         "event": None,
         "direction": None,
         "level": None,
         "detected": False,
+        "event_index": None,
     }
 
-    if len(df) < 12:
+    if len(df) < 15:
         return result
 
-    recent = df.tail(12)
+    start = max(10, len(df) - 12)
 
-    for i in range(1, len(recent)):
-        previous = recent.iloc[:i]
-        candle = recent.iloc[i]
+    for index in range(start, len(df)):
+        # Struktur dihitung hanya dari candle sebelum candle pemecah.
+        before = df.iloc[:index]
+        try:
+            structure = classify_structure(before)
+        except (KeyError, IndexError, TypeError, ValueError):
+            continue
 
-        previous_high = float(previous["high"].max())
-        previous_low = float(previous["low"].min())
-        close = float(candle["close"])
+        last_high = structure.get("last_high")
+        last_low = structure.get("last_low")
+        previous_close = float(df["close"].iloc[index - 1])
+        current_close = float(df["close"].iloc[index])
+        trend = structure.get("trend", "RANGE")
 
-        if close > previous_high:
-            result = {
-                "event": "BOS",
-                "direction": "BULLISH",
-                "level": previous_high,
-                "detected": True,
-            }
+        if last_high:
+            level = float(last_high["price"])
+            if previous_close <= level < current_close:
+                result = {
+                    "event": "CHOCH" if trend == "BEARISH" else "BOS",
+                    "direction": "BULLISH",
+                    "level": level,
+                    "detected": True,
+                    "event_index": index,
+                }
 
-        elif close < previous_low:
-            result = {
-                "event": "BOS",
-                "direction": "BEARISH",
-                "level": previous_low,
-                "detected": True,
-            }
+        if last_low:
+            level = float(last_low["price"])
+            if previous_close >= level > current_close:
+                result = {
+                    "event": "CHOCH" if trend == "BULLISH" else "BOS",
+                    "direction": "BEARISH",
+                    "level": level,
+                    "detected": True,
+                    "event_index": index,
+                }
 
     return result
 
 
-def _detect_displacement(df, direction):
+def _detect_displacement(df, bos):
+    """Displacement harus terjadi setelah BOS dan sebelum candle pullback."""
     result = {
         "confirmed": False,
         "direction": None,
         "body": 0.0,
         "average_body": 0.0,
+        "event_index": None,
     }
 
-    if len(df) < 22:
+    if not bos.get("detected") or bos.get("event_index") is None:
         return result
 
-    bodies = (
-        df["close"] - df["open"]
-    ).abs()
+    direction = bos.get("direction")
+    bos_index = int(bos["event_index"])
 
-    average_body = float(bodies.iloc[-21:-1].mean())
+    # Candle terakhir disisihkan untuk menguji pullback.
+    for index in range(bos_index + 1, len(df) - 1):
+        first = max(0, index - 20)
+        previous_bodies = (
+            df["close"].iloc[first:index]
+            - df["open"].iloc[first:index]
+        ).abs()
 
-    if average_body <= 0:
-        return result
+        if len(previous_bodies) < 5:
+            continue
 
-    candle = df.iloc[-1]
+        average_body = float(previous_bodies.mean())
+        if average_body <= 0:
+            continue
 
-    body = abs(
-        float(candle["close"]) - float(candle["open"])
-    )
-
-    candle_range = max(
-        float(candle["high"]) - float(candle["low"]),
-        0.0000001
-    )
-
-    body_ratio = body / candle_range
-
-    if direction == "BULLISH":
-        correct_direction = (
-            float(candle["close"]) > float(candle["open"])
+        candle = df.iloc[index]
+        open_price = float(candle["open"])
+        close = float(candle["close"])
+        body = abs(close - open_price)
+        candle_range = max(
+            float(candle["high"]) - float(candle["low"]),
+            0.0000001,
         )
-    elif direction == "BEARISH":
+
         correct_direction = (
-            float(candle["close"]) < float(candle["open"])
+            close > open_price if direction == "BULLISH"
+            else close < open_price
         )
-    else:
-        correct_direction = False
 
-    confirmed = (
-        correct_direction
-        and body >= average_body * 1.5
-        and body_ratio >= 0.65
-    )
+        if (
+            correct_direction
+            and body >= average_body * 1.5
+            and body / candle_range >= 0.65
+        ):
+            return {
+                "confirmed": True,
+                "direction": direction,
+                "body": body,
+                "average_body": average_body,
+                "event_index": index,
+            }
 
-    return {
-        "confirmed": confirmed,
-        "direction": direction if confirmed else None,
-        "body": body,
-        "average_body": average_body,
-    }
+    return result
 
 
-def _detect_pullback(df, bos, direction):
+def _detect_pullback(df, bos, displacement):
+    """Pullback hanya valid setelah candle displacement."""
     result = {
         "detected": False,
         "held": False,
@@ -331,25 +349,26 @@ def _detect_pullback(df, bos, direction):
         "level": bos.get("level"),
     }
 
-    level = bos.get("level")
+    if (
+        not bos.get("detected")
+        or not displacement.get("confirmed")
+        or displacement.get("event_index") is None
+        or int(displacement["event_index"]) >= len(df) - 1
+    ):
+        return result
 
-    if not bos.get("detected") or level is None:
+    level = bos.get("level")
+    direction = bos.get("direction")
+    if level is None:
         return result
 
     candle = df.iloc[-1]
-
     high = float(candle["high"])
     low = float(candle["low"])
     close = float(candle["close"])
 
-    average_range = (
-        df["high"] - df["low"]
-    ).tail(20).mean()
-
-    tolerance = max(
-        float(average_range) * 0.25,
-        0.0000001
-    )
+    average_range = (df["high"] - df["low"]).tail(20).mean()
+    tolerance = max(float(average_range) * 0.25, 0.0000001)
 
     touched = (
         low <= float(level) + tolerance
@@ -363,11 +382,12 @@ def _detect_pullback(df, bos, direction):
     else:
         held = False
 
-    result["detected"] = touched
-    result["held"] = held
-    result["direction"] = direction if held else None
-
-    return result
+    return {
+        "detected": touched,
+        "held": held,
+        "direction": direction if held else None,
+        "level": float(level),
+    }
 
 
 def analyze_multi_timeframe(h1, m15, m5):
@@ -430,15 +450,12 @@ def analyze_multi_timeframe(h1, m15, m5):
 
     bos = _detect_bos(m5)
 
-    displacement = _detect_displacement(
-        m5,
-        bos.get("direction")
-    )
+    displacement = _detect_displacement(m5, bos)
 
     pullback = _detect_pullback(
         m5,
         bos,
-        bos.get("direction")
+        displacement,
     )
 
     ready = h1_trend in ("BULLISH", "BEARISH")

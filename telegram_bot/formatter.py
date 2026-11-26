@@ -84,7 +84,7 @@ def format_analysis(analysis, signal, score=None):
     if score is not None:
         if isinstance(score, dict):
             score_value = score.get("score", "-")
-            category = score.get("category")
+            category = score.get("quality") or score.get("category")
         else:
             score_value = score
             category = None

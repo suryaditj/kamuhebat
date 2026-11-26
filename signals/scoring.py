@@ -6,14 +6,20 @@ def calculate_score(analysis: dict, signal: dict) -> dict:
     Skor bukan probabilitas kemenangan.
     """
 
-    if signal.get("status") not in ("BULLISH", "BEARISH"):
+    status = str(signal.get("status", "WAIT")).upper()
+    if status not in ("BUY", "SELL", "BULLISH", "BEARISH"):
         return {
             "score": 0,
             "quality": "TIDAK ADA SETUP",
             "details": {}
         }
 
-    direction = signal["status"]
+    direction = {
+        "BUY": "BULLISH",
+        "SELL": "BEARISH",
+        "BULLISH": "BULLISH",
+        "BEARISH": "BEARISH",
+    }[status]
 
     h1 = analysis.get("h1", {})
     m15 = analysis.get("m15", {})
