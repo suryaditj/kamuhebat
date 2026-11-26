@@ -243,14 +243,64 @@ def evaluate_entry(
         elif early_valid:
             entry_type = "EARLY"
 
+    # ==========================================
+    # 7. DIAGNOSIS WAIT
+    # ==========================================
+
     if entry_type is None:
-        return wait_result(
-            "Bukti entry belum lengkap",
-            evidence,
-        )
+        early_requirements = {
+            "zona tersentuh": zone_touched,
+            "rejection": rejection_valid,
+            "struktur M5": structure_valid,
+        }
+
+        confirmed_requirements = {
+            "zona tersentuh": zone_touched,
+            "rejection": rejection_valid,
+            "BOS/CHoCH": bos_valid,
+            "displacement": displacement_valid,
+            "pullback": pullback_valid,
+        }
+
+        early_missing = [
+            name
+            for name, valid in early_requirements.items()
+            if not valid
+        ]
+
+        confirmed_missing = [
+            name
+            for name, valid in confirmed_requirements.items()
+            if not valid
+        ]
+
+        evidence["early_missing"] = early_missing
+        evidence["confirmed_missing"] = confirmed_missing
+
+        if entry_style == "early":
+            reason = (
+                "EARLY belum lengkap: "
+                + ", ".join(early_missing)
+            )
+
+        elif entry_style == "confirmed":
+            reason = (
+                "CONFIRMED belum lengkap: "
+                + ", ".join(confirmed_missing)
+            )
+
+        else:
+            reason = (
+                "EARLY belum lengkap: "
+                + ", ".join(early_missing)
+                + " | CONFIRMED belum lengkap: "
+                + ", ".join(confirmed_missing)
+            )
+
+        return wait_result(reason, evidence)
 
     # ==========================================
-    # 7. STOP LOSS
+    # 8. STOP LOSS
     # ==========================================
 
     if direction == "BULLISH":
@@ -267,7 +317,7 @@ def evaluate_entry(
         )
 
     # ==========================================
-    # 8. TAKE PROFIT
+    # 9. TAKE PROFIT
     # ==========================================
 
     if direction == "BULLISH":
@@ -285,7 +335,7 @@ def evaluate_entry(
             return wait_result("Posisi SELL tidak valid", evidence)
 
     # ==========================================
-    # 9. FINAL RESULT
+    # 10. FINAL RESULT
     # ==========================================
 
     return {
