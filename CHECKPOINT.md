@@ -40,3 +40,17 @@ python -m compileall -q .
 - Bot berjalan dengan polling terjadwal GitHub Actions, bukan proses 24/7. Tombol inline dapat terlambat diproses dan jawaban callback Telegram bisa kedaluwarsa di antara jadwal workflow.
 - Pastikan GitHub Actions memiliki izin `Contents: Read and write`, dan secret `TELEGRAM_BOT_TOKEN` serta `TELEGRAM_CHAT_ID` telah diatur.
 - Sinyal tetap perlu diuji pada data historis/demo sebelum dipakai sebagai dasar keputusan trading. Tes perangkat lunak tidak membuktikan profitabilitas strategi.
+
+## Runtime polling update — 2026-11-26
+
+1. Mengganti polling satu kali (`timeout=0`) dengan long polling berulang selama maksimal 180 detik per eksekusi.
+2. Setiap long-poll menunggu maksimal 20 detik agar command dan callback inline dapat diambil selama job aktif.
+3. Offset Telegram tetap disimpan setelah setiap update berhasil diserahkan ke handler, lalu dipersistenkan oleh workflow ke repository.
+4. Batas waktu job GitHub Actions dinaikkan menjadi 5 menit; `BOT_RUN_SECONDS=180` memberi waktu untuk setup dan penyimpanan state.
+5. Workflow tetap dijalankan manual atau melalui jadwal cron setiap 5 menit. Ini bukan bot 24/7 dan dapat memiliki jeda saat pergantian job.
+
+### Verifikasi tambahan
+
+- `python -m pytest -q`: **41 passed**.
+- `python -m compileall -q .`: harus dijalankan kembali setelah perubahan runtime.
+- Belum ada pengujian live Telegram/BiQuote dari lingkungan lokal.

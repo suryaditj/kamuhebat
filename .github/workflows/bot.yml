@@ -17,7 +17,7 @@ permissions:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 5
 
     steps:
       - name: Checkout repository
@@ -45,6 +45,7 @@ jobs:
           TIMEFRAME_ENTRY: 5m
           ENTRY_STYLE: hybrid
           MAX_RISK_PERCENT: 1.0
+          BOT_RUN_SECONDS: 180
         run: python main.py
 
       - name: Save Bot State and Signal History
