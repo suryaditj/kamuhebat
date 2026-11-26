@@ -1,39 +1,39 @@
 
-name: Hybrid SMC Hunter
+name: HYBRID SMC HUNTER
 
 on:
   workflow_dispatch:
 
-  schedule:
-    - cron: "*/5 * * * *"
+permissions:
+  contents: write
 
 concurrency:
   group: hybrid-smc-hunter
   cancel-in-progress: false
 
-permissions:
-  contents: write
-
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 330
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run Telegram Bot
+      - name: Run HYBRID SMC HUNTER
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -45,21 +45,20 @@ jobs:
           TIMEFRAME_ENTRY: 5m
           ENTRY_STYLE: hybrid
           MAX_RISK_PERCENT: 1.0
-          BOT_RUN_SECONDS: 180
+          BOT_RUN_SECONDS: 17700
         run: python main.py
 
-      - name: Save Bot State and Signal History
+      - name: Save Telegram state and signal history
         if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Kedua file harus dipersistenkan karena runner GitHub Actions bersifat sementara.
-          git add -A -- state data
+          git add state/telegram_offset.json data/signal_history.json
 
           if ! git diff --cached --quiet; then
             git commit -m "Update bot state and signal history"
-            git push
+            git push origin HEAD:main
           else
-            echo "Tidak ada perubahan state atau riwayat."
+            echo "Tidak ada perubahan state."
           fi
