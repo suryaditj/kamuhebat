@@ -1,3 +1,4 @@
+
 import pandas as pd
 
 
@@ -6,15 +7,19 @@ def analyze_rejection(
     min_wick_ratio: float = 1.5,
     min_body_ratio: float = 0.10
 ) -> dict:
-    """
-    Mendeteksi penolakan harga berdasarkan panjang wick,
-    ukuran body, dan posisi penutupan candle.
-    """
+    """Mendeteksi rejection berdasarkan wick dan posisi penutupan."""
 
-    open_price = float(candle["open"])
-    high = float(candle["high"])
-    low = float(candle["low"])
-    close = float(candle["close"])
+    try:
+        open_price = float(candle["open"])
+        high = float(candle["high"])
+        low = float(candle["low"])
+        close = float(candle["close"])
+    except (KeyError, TypeError, ValueError):
+        return {
+            "rejection": False,
+            "direction": None,
+            "reason": "Data candle tidak valid"
+        }
 
     total_range = high - low
 
@@ -53,7 +58,7 @@ def analyze_rejection(
             "rejection": True,
             "direction": "BULLISH",
             "wick_ratio": lower_wick / max(body, 0.000001),
-            "reason": "Ekor bawah panjang dan harga ditutup dekat bagian atas"
+            "reason": "Ekor bawah panjang dan penutupan dekat bagian atas"
         }
 
     if bearish and not bullish:
@@ -61,13 +66,137 @@ def analyze_rejection(
             "rejection": True,
             "direction": "BEARISH",
             "wick_ratio": upper_wick / max(body, 0.000001),
-            "reason": "Ekor atas panjang dan harga ditutup dekat bagian bawah"
+            "reason": "Ekor atas panjang dan penutupan dekat bagian bawah"
         }
 
     return {
         "rejection": False,
         "direction": None,
         "reason": "Belum ada penolakan yang jelas"
+    }
+
+
+def rejection_at_zone(
+    candle: pd.Series,
+    zone: dict
+) -> dict:
+    """Memastikan rejection terjadi pada zona yang sesuai."""
+
+    if not isinstance(zone, dict):
+        return {
+            "rejection": False,
+            "confirmed": False,
+            "zone_touched": False,
+            "direction": None,
+            "reason": "Zona tidak valid"
+        }
+
+    result = analyze_rejection(candle)
+
+    try:
+        high = float(candle["high"])
+        low = float(candle["low"])
+        zone_low = float(zone["low"])
+        zone_high = float(zone["high"])
+    except (KeyError, TypeError, ValueError):
+        return {
+            **result,
+            "confirmed": False,
+            "zone_touched": False,
+            "reason": "Data zona atau candle tidak valid"
+        }
+
+    touched = high >= zone_low and low <= zone_high
+
+    expected_direction = (
+        "BULLISH" if zone.get("type") == "DEMAND"
+        else "BEARISH" if zone.get("type") == "SUPPLY"
+        else None
+    )
+
+    confirmed = (
+        touched
+        and result["rejection"]
+        and result["direction"] == expected_direction
+    )
+
+    return {
+        **result,
+        "zone_touched": touched,
+        "confirmed": confirmed,
+        "reason": (
+            "Rejection valid pada zona"
+            if confirmed
+            else "Rejection belum memenuhi syarat zona"
+        )
+    }
+
+
+def analyze_recent_zone_rejection(
+    df: pd.DataFrame,
+    zone: dict,
+    lookback: int = 5
+) -> dict:
+    """
+    Memeriksa rejection pada beberapa candle terakhir.
+
+    Candle terakhir dianggap candle berjalan jika kolom isOpen
+    tersedia dan bernilai True, sehingga tidak ikut diperiksa.
+    """
+
+    empty_result = {
+        "rejection": False,
+        "detected": False,
+        "direction": None,
+        "in_zone": False,
+        "candle_time": None,
+        "reason": "Belum ada rejection valid"
+    }
+
+    if (
+        not isinstance(df, pd.DataFrame)
+        or df.empty
+        or not isinstance(zone, dict)
+        or lookback < 1
+    ):
+        return empty_result
+
+    closed_df = df.copy()
+
+    if "isOpen" in closed_df.columns:
+        is_open = (
+            closed_df["isOpen"]
+            .astype(str)
+            .str.lower()
+            .isin(("true", "1", "yes"))
+        )
+        closed_df = closed_df.loc[~is_open]
+
+    recent = closed_df.tail(lookback)
+
+    if recent.empty:
+        return empty_result
+
+    for timestamp, candle in reversed(list(recent.iterrows())):
+        result = rejection_at_zone(candle, zone)
+
+        if result.get("confirmed"):
+            return {
+                "rejection": True,
+                "detected": True,
+                "direction": result["direction"],
+                "in_zone": True,
+                "candle_time": str(timestamp),
+                "reason": result["reason"]
+            }
+
+    return {
+        **empty_result,
+        "in_zone": any(
+            rejection_at_zone(candle, zone).get("zone_touched", False)
+            for _, candle in recent.iterrows()
+        ),
+        "reason": "Tidak ditemukan rejection valid pada candle tertutup terakhir"
     }
 
 
@@ -79,23 +208,17 @@ def detect_repeated_rejection(
     lookback: int = 10,
     min_touches: int = 2
 ) -> dict:
-    """
-    Mencari penolakan berulang di sekitar level harga.
-
-    direction:
-    BEARISH = penolakan dari atas (resistance/supply)
-    BULLISH = penolakan dari bawah (support/demand)
-    """
+    """Mendeteksi rejection berulang di sekitar level."""
 
     direction = direction.upper()
 
     if direction not in ("BULLISH", "BEARISH"):
         raise ValueError("Direction harus BULLISH atau BEARISH")
 
-    if tolerance <= 0 or min_touches < 1:
-        raise ValueError("Tolerance dan min_touches tidak valid")
+    if tolerance <= 0 or min_touches < 1 or lookback < 1:
+        raise ValueError("Parameter tidak valid")
 
-    if len(df) == 0:
+    if not isinstance(df, pd.DataFrame) or df.empty:
         return {
             "confirmed": False,
             "touches": 0,
@@ -104,11 +227,9 @@ def detect_repeated_rejection(
         }
 
     recent = df.tail(lookback)
-
     touches = []
 
     for timestamp, candle in recent.iterrows():
-
         rejection = analyze_rejection(candle)
 
         if not rejection["rejection"]:
@@ -117,25 +238,16 @@ def detect_repeated_rejection(
         if rejection["direction"] != direction:
             continue
 
-        if direction == "BEARISH":
-            touched = (
-                float(candle["high"]) >= level - tolerance
-                and float(candle["high"]) <= level + tolerance
-            )
-        else:
-            touched = (
-                float(candle["low"]) >= level - tolerance
-                and float(candle["low"]) <= level + tolerance
-            )
+        price = (
+            float(candle["high"])
+            if direction == "BEARISH"
+            else float(candle["low"])
+        )
 
-        if touched:
+        if abs(price - level) <= tolerance:
             touches.append({
-                "time": timestamp,
-                "price": (
-                    float(candle["high"])
-                    if direction == "BEARISH"
-                    else float(candle["low"])
-                )
+                "time": str(timestamp),
+                "price": price
             })
 
     confirmed = len(touches) >= min_touches
@@ -147,53 +259,8 @@ def detect_repeated_rejection(
         "level": level,
         "touch_details": touches,
         "reason": (
-            f"{len(touches)} penolakan ditemukan di sekitar level"
+            f"{len(touches)} rejection ditemukan"
             if confirmed
-            else "Jumlah penolakan belum mencukupi"
-        )
-    }
-
-
-def rejection_at_zone(
-    candle: pd.Series,
-    zone: dict
-) -> dict:
-    """
-    Memeriksa apakah candle menunjukkan penolakan
-    sesuai jenis zona Supply atau Demand.
-    """
-
-    result = analyze_rejection(candle)
-
-    if not result["rejection"]:
-        return result
-
-    high = float(candle["high"])
-    low = float(candle["low"])
-
-    touched = (
-        high >= zone["low"]
-        and low <= zone["high"]
-    )
-
-    expected_direction = (
-        "BEARISH"
-        if zone["type"] == "SUPPLY"
-        else "BULLISH"
-    )
-
-    confirmed = (
-        touched
-        and result["direction"] == expected_direction
-    )
-
-    return {
-        **result,
-        "zone_touched": touched,
-        "confirmed": confirmed,
-        "reason": (
-            "Rejection sesuai arah zona"
-            if confirmed
-            else "Rejection belum sesuai zona"
+            else "Jumlah rejection belum mencukupi"
         )
     }
