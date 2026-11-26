@@ -2,6 +2,7 @@
 import pandas as pd
 
 from analysis.market_structure import classify_structure
+from analysis.supply_demand import detect_zones
 
 
 MIN_CANDLES = 30
@@ -63,79 +64,17 @@ def _get_trend(df):
 
 
 def _detect_zones(df, max_zones=5):
-    zones = []
-    average_range = (
-        df["high"] - df["low"]
-    ).tail(30).mean()
-
-    if not average_range or average_range <= 0:
-        return zones
-
-    start = max(0, len(df) - 100)
-
-    for i in range(start, len(df) - 2):
-        for base_size in (1, 2, 3):
-            base_start = i
-            impulse_index = i + base_size
-
-            if impulse_index >= len(df):
-                continue
-
-            base = df.iloc[base_start:impulse_index]
-            impulse = df.iloc[impulse_index]
-
-            base_range = (
-                base["high"] - base["low"]
-            ).mean()
-
-            impulse_body = abs(
-                float(impulse["close"])
-                - float(impulse["open"])
-            )
-
-            if base_range > average_range * 0.8:
-                continue
-
-            if impulse_body < average_range * 1.5:
-                continue
-
-            if float(impulse["close"]) > float(impulse["open"]):
-                zone_type = "DEMAND"
-            elif float(impulse["close"]) < float(impulse["open"]):
-                zone_type = "SUPPLY"
-            else:
-                continue
-
-            zones.append({
-                "type": zone_type,
-                "low": float(base["low"].min()),
-                "high": float(base["high"].max()),
-                "time": str(base.index[-1]),
-                "impulse_time": str(df.index[impulse_index]),
-            })
-
-    zones.sort(
-        key=lambda zone: zone["impulse_time"],
-        reverse=True
-    )
-
-    unique = []
-
-    for zone in zones:
-        overlaps = any(
-            zone["type"] == old["type"]
-            and zone["low"] <= old["high"]
-            and zone["high"] >= old["low"]
-            for old in unique
+    """Gunakan satu detektor zona resmi untuk semua timeframe."""
+    try:
+        return detect_zones(
+            df,
+            base_min=1,
+            base_max=3,
+            impulse_multiplier=1.5,
+            max_zones=max_zones,
         )
-
-        if not overlaps:
-            unique.append(zone)
-
-        if len(unique) >= max_zones:
-            break
-
-    return unique
+    except (KeyError, TypeError, ValueError):
+        return []
 
 
 def _select_target_zone(zones, bias, price):
@@ -427,19 +366,10 @@ def analyze_multi_timeframe(h1, m15, m5):
         current_price
     ) if h1_trend in ("BULLISH", "BEARISH") else None
 
-    # Zona M15 harus searah dengan bias H1.
-    # Jika zona H1 tersedia, zona M15 harus berada di dalam
-    # atau beririsan dengan area zona H1.
+    # H1 menentukan arah; M15 mencari zona searah untuk area entry.
+    # Zona M15 tidak wajib beririsan dengan zona H1 karena kedua timeframe
+    # memiliki skala dan rentang harga yang berbeda.
     target_zone = m15_target_zone
-
-    if h1_target_zone and m15_target_zone:
-        overlaps_h1 = (
-            m15_target_zone["low"] <= h1_target_zone["high"]
-            and m15_target_zone["high"] >= h1_target_zone["low"]
-        )
-
-        if not overlaps_h1:
-            target_zone = None
 
     last_candle = m5.iloc[-1]
 
@@ -468,6 +398,8 @@ def analyze_multi_timeframe(h1, m15, m5):
         "target_zone": target_zone,
         "reason": (
             "Analisis multi-timeframe selesai."
+            if ready and target_zone
+            else "Belum ada zona M15 searah dengan bias H1."
             if ready
             else "Arah H1 belum jelas."
         ),
@@ -481,6 +413,12 @@ def analyze_multi_timeframe(h1, m15, m5):
             "trend": m15_trend,
             "zones": m15_zones,
             "target_zone": target_zone,
+            "zone_candidates": [
+                zone for zone in m15_zones
+                if zone.get("type") == (
+                    "DEMAND" if h1_trend == "BULLISH" else "SUPPLY"
+                )
+            ] if h1_trend in ("BULLISH", "BEARISH") else [],
         },
         "m5": {
             "current_price": current_price,

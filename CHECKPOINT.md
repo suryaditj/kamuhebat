@@ -54,3 +54,25 @@ python -m compileall -q .
 - `python -m pytest -q`: **41 passed**.
 - `python -m compileall -q .`: harus dijalankan kembali setelah perubahan runtime.
 - Belum ada pengujian live Telegram/BiQuote dari lingkungan lokal.
+
+## Perbaikan zona M15 — 2026-11-26
+
+1. `analysis.multi_timeframe` sekarang memakai `analysis.supply_demand.detect_zones()` sebagai satu-satunya detektor zona untuk H1 dan M15. Ini menyatukan pendeteksian pola DBR, RBR, RBD, dan DBD.
+2. Menghapus syarat bahwa zona M15 harus beririsan dengan zona H1. H1 menentukan bias; M15 mencari zona searah untuk area entry. Perbedaan skala harga antar-timeframe tidak lagi otomatis membuang zona M15 yang valid.
+3. Menambahkan `m15.zone_candidates` agar zona-zona searah bias dapat diperiksa saat debugging.
+4. Menambahkan tiga tes khusus deteksi zona dan pemilihan zona M15.
+
+### Hasil tes terbaru
+
+```text
+44 passed
+```
+
+Perintah yang dijalankan:
+
+```bash
+python -m pytest -q
+python -m compileall -q .
+```
+
+Catatan: tes memakai data sintetis. Keberhasilan menemukan zona pada data sintetis belum membuktikan bahwa data candle BiQuote live saat ini membentuk zona valid. Jika bot masih WAIT, periksa `m15.zones` dan `m15.zone_candidates` pada log analisis.
